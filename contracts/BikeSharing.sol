@@ -92,7 +92,7 @@ contract BikeSharing {
 
     }
     
-    function calculateFee(uint duration) public pure returns (uint) {
+    function calculateFee(uint duration) public view returns (uint) {
         uint num_hours = duration / 3600;
         if(num_hours > 24){
             return requiredDeposit;
@@ -113,7 +113,7 @@ contract BikeSharing {
 
         clientStructs[msg.sender].returned += owedToClient;
         
-        if(!msg.sender.call.value(owedToClient)) revert();
+        msg.sender.call.value(owedToClient));
 
         emit LogReturnedFunds(msg.sender, owedToClient);
         
