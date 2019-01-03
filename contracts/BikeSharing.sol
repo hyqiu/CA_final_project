@@ -34,6 +34,7 @@ contract BikeSharing {
     // Events
     event LogBikeRent(uint bikeId, address renter, bool status);
     event LogReceivedFunds(address sender, uint amount);
+    event LogReturnedFunds(address recipient, uint amount);
 
     Bike[] public bikes;
     
@@ -88,25 +89,33 @@ contract BikeSharing {
         emit LogBikeRent(bikeId, msg.sender, bikes[bikeId].currentlyInUse);
 
         return bikes[bikeId].currentlyInUse;
+
     }
     
-    function calculateFee(uint duration) public view returns (uint) {
+    function calculateFee(uint duration) public pure returns (uint) {
         uint num_hours = duration / 3600;
         if(num_hours > 24){
-            return deposit;
+            return requiredDeposit;
         }
         uint toPay = num_hours * hourlyFee;
         return toPay;
     }
     
-    function surrenderBike(uint bikeId) public payable returns (bool) {
+    function surrenderBike(uint bikeId) public returns (bool success) {
         require(bikes[bikeId].currentlyInUse == true && 
             bikes[bikeId].lastRenter == msg.sender);
         
-        uint rentalDuration = now - bikes[bikeId].usageTime; 
-        uint split = deposit - calculateFee(rentalDuration);
+        if(!isClient(msg.sender)) revert();
+
+        uint feeCharged = calculateFee(now - bikes[bikeId].usageTime);
+
+        uint owedToClient = clientStructs[msg.sender].received - feeCharged;
+
+        clientStructs[msg.sender].returned += owedToClient;
         
-        msg.sender.call.value(split);
+        if(!msg.sender.call.value(owedToClient)) revert();
+
+        emit LogReturnedFunds(msg.sender, owedToClient);
         
         return true;
     }
