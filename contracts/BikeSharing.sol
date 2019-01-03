@@ -1,15 +1,15 @@
 pragma solidity ^0.5.2;
 
 contract BikeSharing {
-    
-    // Events
-    event OnBikeRent(uint bikeId, address renter, bool status);
-    
+        
     // State variables
     address admin;
-    uint256 deposit;
+    uint256 requiredDeposit;
     uint256 hourlyFee;
     
+    mapping(address => Client) public clientStructs;
+    address[] public clientList;
+
     // Data structures
     struct Bike {
         address lastRenter;
@@ -18,6 +18,12 @@ contract BikeSharing {
         uint usageTime;
     }
     
+    struct Client {
+        uint received;
+        uint returned;
+        uint clientListPointer;
+    }
+
     // Modifiers
     /*
     modifier adminOnly() {
@@ -25,11 +31,15 @@ contract BikeSharing {
     }
     */
     
+    // Events
+    event LogBikeRent(uint bikeId, address renter, bool status);
+    event LogReceivedFunds(address sender, uint amount);
+
     Bike[] public bikes;
     
-    constructor(uint bikeCount, uint256 _deposit, uint256 _hourlyFee) public {
+    constructor(uint bikeCount, uint256 _requiredDeposit, uint256 _hourlyFee) public {
         admin = msg.sender;
-        deposit = _deposit;
+        requiredDeposit = _requiredDeposit;
         hourlyFee = _hourlyFee;
         
         for (uint i=0; i<bikeCount; i++) {
@@ -42,21 +52,41 @@ contract BikeSharing {
         }
     } 
     
+    function getClientCount() public view returns(uint clientCount){
+        return clientList.length;
+    }
+
+    function isClient(address client) public view returns (bool isIndeed){
+        if (clientList.length == 0) return false;
+        return clientList[clientStructs[client].clientListPointer] == client;
+    }
+
+    function getBalance() public view returns(uint){
+        return address(this).balance;
+    }
+
     function rentBike(uint bikeId) public payable returns (bool) {
+        require(msg.sender.balance >= requiredDeposit && msg.value >= requiredDeposit);
         require(bikeId >= 0 && bikeId < bikes.length);
         require(bikes[bikeId].currentlyInUse == false);
-        require(msg.value == deposit);
-    
-        address userAddress = msg.sender;
         
-        // Send deposit money to the contract
-        admin.call.value(msg.value);
+        // If client is not yet a client
+
+        if(!isClient(msg.sender)){
+            clientStructs[msg.sender].clientListPointer = clientList.push(msg.sender) - 1;
+        }
         
+        clientStructs[msg.sender].received += msg.value;
+
+        emit LogReceivedFunds(msg.sender, msg.value);
+
         // Change bike situation
-        bikes[bikeId].lastRenter = userAddress;
+        bikes[bikeId].lastRenter = msg.sender;
         bikes[bikeId].currentlyInUse = true;
         bikes[bikeId].usageTime = now;
         
+        emit LogBikeRent(bikeId, msg.sender, bikes[bikeId].currentlyInUse);
+
         return bikes[bikeId].currentlyInUse;
     }
     
