@@ -35,12 +35,15 @@ Workflow :
 		* The bike sharing contract can modify the count of accident. 
 		* The insurance contract will automate payment of one bike
 
-Ideas : 
-- Customer can reduce their accident count by redeeming a token --> TO IMPLEMENT
+======================================================== Ideas ======================================================== 
+- Customer can reduce their accident count by redeeming a token --> TO IMPLEMENT IN INSURANCE CONTRACT
 - Ban client (last resort, after fake declaration) --> TO IMPLEMENT
 - A Proof-of-Existence contract where you must prove the bike still looks good. 
 - Send to repair shop the broken ones if it falls below a certain threshold ? 
 - Add IPFS geolocation ? 
+
+======================================================== Things to clean ======================================================== 
+- The Bike Struct (with enum, no need for currentlyInUse !)
 
 ===========
 
