@@ -141,7 +141,17 @@ contract BikeSharing {
     event TokenRewardSet(uint256 tokenReward);
     event TokenPaid(address riderAddress, uint256 amount);
 
+    // Client creation
+    event ClientCreated(address clientAddress);
+
     // Change of state events
+    event BikeAvailable(uint bikeId);
+    event ClientGoodToGo(address clientAddress)
+
+    event BikeInRide(uint bikeId);
+    event ClientInRide(address clientAddress);
+
+    event BikeDeactivated(uint bikeId);
 
 
     /*
@@ -279,15 +289,6 @@ contract BikeSharing {
                         Rent and surrender bikes
     ================================================================
     */
-
-    event BikeAvailable(uint bikeId);
-    event ClientCreated(address clientAddress);
-
-    event BikeInRide(uint bikeId);
-    event ClientInRide(address clientAddress);
-
-    event BikeDeactivated(uint bikeId);
-    event ClientGoodToGo(address clientAddress)
 
     function rentBike(uint bikeId) 
         public 
