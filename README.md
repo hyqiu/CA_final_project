@@ -36,8 +36,11 @@ Workflow :
 		* The insurance contract will automate payment of one bike
 
 Ideas : 
-- Customer can reduce their accident count by redeeming a token
-- Ban client (last resort, after fake declaration)
+- Customer can reduce their accident count by redeeming a token --> TO IMPLEMENT
+- Ban client (last resort, after fake declaration) --> TO IMPLEMENT
+- A Proof-of-Existence contract where you must prove the bike still looks good. 
+- Send to repair shop the broken ones if it falls below a certain threshold ? 
+- Add IPFS geolocation ? 
 
 ===========
 
@@ -54,4 +57,4 @@ Possible tests :
 
 ===========
 
-- Security issue : what if the guy rents another one ? 
+- Security issue : what if the guy rents another one ? OK --> added enums
