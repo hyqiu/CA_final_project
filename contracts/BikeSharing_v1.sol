@@ -243,6 +243,8 @@ contract BikeSharing {
         return isClientInsured[msg.sender];
     }
 
+    function tokensAgainstCount()
+
     /*
     ================================================================
                             Bike housekeeping

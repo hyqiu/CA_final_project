@@ -61,3 +61,10 @@ Possible tests :
 ===========
 
 - Security issue : what if the guy rents another one ? OK --> added enums
+
+===========
+
+- THE PEOPLE WHO HAVE INSURANCE MUST HAVE A PUBLIC VIEWABLE RECORD, COMMON TO INSURANCE COMPANY AND BIKE COMPANY
+- TOKENCOUNT MUST BE PUBLIC AS WELL
+
+
