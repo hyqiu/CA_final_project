@@ -12,7 +12,7 @@ contract BikeSharing {
     // Hyperparameters
 
     address admin;
-    uint256 requiredDeposit;
+    uint requiredDeposit;
     uint256 hourlyFee;
 
     // Mappings
