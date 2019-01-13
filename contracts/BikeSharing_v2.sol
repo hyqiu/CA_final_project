@@ -1,50 +1,29 @@
 pragma solidity ^0.5.2;
 
 import "../installed_contracts/zeppelin/contracts/math/SafeMath.sol";
-import "./BehaviourToken.sol"
 
 contract BikeSharing {
 
-    using SafeMath for uint256;
-    
-    // CONSTANTS
+	using SafeMath for uint256;
 
-    uint constant public MAX_BIKE_COUNT = 1000;
-    uint constant public DAMAGE_PAYMENT = 1 ether;
-    uint constant public INSURANCE_RETENTION = 100 finney; 
-
-    /*
-    ================================================================
-                            State variables
-    ================================================================
-    */ 
+	uint constant public MAX_BIKE_COUNT = 1000;
+	uint constant public BIKE_VALUE = 1 ether;
 
     // Hyperparameters
 
     address admin;
     uint256 requiredDeposit;
     uint256 hourlyFee;
-    uint256 premiumRate;
 
-    // Bike sharing 
-
+    // Mappings
     mapping(address => Client) public clientMapping;
-    mapping(uint256 => Bike) public bikeMapping;
-    mapping(uint256 => bool) public isBikeActive;
-    mapping(address => bool) public isBikeClient;
+    mapping(uint256 => Bike) bikeMapping; // not public 
+    mapping(uint256 => bool) isBikeActive; // not public
+    mapping(address => bool) isBikeClient; // notpublic
+
+    // ClientLists for count
 
     address[] public clientList;
-    uint256 public toRepair; 
-
-    // Insurance
-
-    mapping(address => bool) public isClientInsured;
-    mapping(address => InsuranceClient) public insuranceMapping;
-    
-    //////////// Tokens
-    BehaviourToken public behaviourToken; 
-    address public tokenAddress;
-    uint256 public tokenRewardAmount;
 
     /*
     ================================================================
@@ -64,17 +43,14 @@ contract BikeSharing {
     }
     
     struct Client {
+    	uint clientListPointer;
+    	ClientState state;
+    	// For 1 ride, how much received and returned
         uint received;
         uint returned;
-        uint clientListPointer;
-        ClientState state;
-    }
-
-    struct InsuranceClient {
-        uint accidentCount;
-        uint receivedPremiums; 
-        uint claimPayouts;
-        uint tokenCount;
+    	// Count of number of rides, number of good rides
+    	uint256 numberRides;
+    	uint256 goodRides;
     }
 
     /*
@@ -82,14 +58,6 @@ contract BikeSharing {
                             Modifiers
     ================================================================
     */ 
-
-    /*
-    modifier adminOnly() {
-        if(msg.sender == _admin) _;
-    }
-    */
-    
-    // Modifier not disallow the admin to rent bike 
 
     modifier adminOnly() {
         require(msg.sender == admin);
@@ -116,12 +84,22 @@ contract BikeSharing {
         _;
     }
 
-    modifier positiveReward (uint256 _rewardValue) {
-        require(_rewardValue > 0);
+	// TODO : a customer cannot rent another bike while he's riding one
+
+    modifier bikeInRide (uint bikeId) {
+        require(bikeMapping[bikeId].state == BikeState.IN_USE);
         _;
     }
 
-    // TODO : a customer cannot rent another bike while he's riding one
+    modifier bikeUser (uint bikeId, address clientAdr) {
+        require(bikeMapping[bikeId].lastRenter == clientAdr);
+        _;
+    }
+
+    modifier clientInRide (address clientAdr) {
+        require(clientMapping[clientAdr].state == ClientState.IN_RIDE);
+        _;
+    }
 
 
     /*
@@ -137,10 +115,6 @@ contract BikeSharing {
     // Fallback event
     event Deposit(address indexed sender, uint256 value);
 
-    // Token events
-    event TokenRewardSet(uint256 tokenReward);
-    event TokenPaid(address riderAddress, uint256 amount);
-
     // Client creation
     event ClientCreated(address clientAddress);
 
@@ -153,103 +127,24 @@ contract BikeSharing {
 
     event BikeDeactivated(uint bikeId);
 
-
     /*
     ================================================================
                             Constructor
     ================================================================
     */ 
 
-    constructor(uint256 _hourlyFee, uint256 _premiumRate) public {
-        admin = msg.sender;
-        requiredDeposit = DAMAGE_PAYMENT;
-        hourlyFee = _hourlyFee;
-        premiumRate = _premiumRate;
-
-        // Initialize a BehaviourToken
-
-        setBehaviourToken(new BehaviourToken());
-        uint256 rideReward = 1;
-        setBehaviourTokenReward(rideReward);
-
-    } 
-
-    /*
-    ================================================================
-                            Token distribution
-    ================================================================
-    */ 
-
-    function setBehaviourTokenReward(uint256 _tokenReward)
-        public
-        // Modifier on being onlyOwner
-        positiveReward(_tokenReward)
-    {
-        tokenRewardAmount = _tokenReward;
-        emit TokenRewardSet(tokenRewardAmount);
+    constructor(uint256 _hourlyFee) public {
+    	bikeAdmin = msg.sender;
+    	requiredDeposit = BIKE_VALUE;
+    	hourlyFee = _hourlyFee;
     }
-
-    function setBehaviourToken(address _newBehaviourToken)
-        internal
-        notNullAddress(_newBehaviourToken)
-    {
-        behaviourToken = BehaviourToken(_newBehaviourToken);
-        tokenAddress = address(behaviourToken);
-    }
-
-    function rewardRider(address _riderAddress)
-        private
-        notNullAddress(_riderAddress)
-    {
-        require(tokenRewardAmount > 0);
-        behaviourToken.transfer(_riderAddress, tokenRewardAmount);
-        emit TokenPaid(_riderAddress, tokenRewardAmount);
-    }
-
-    /*
-    ================================================================
-                            Insurance
-    ================================================================
-    */ 
-
-    function calculatePremium(address insuranceTaker) 
-        view
-        public
-        returns (uint256 premium)
-    {
-        InsuranceClient memory customer = insuranceMapping[msg.sender];
-        return (customer.accidentCount + 1) * premiumRate;
-    }
-
-    function underwriteInsurance()
-        public
-        payable
-        returns (bool success)
-    {
-        // The client must not be a client already
-        require(isClientInsured[msg.sender]==false);        
-        require(msg.value == calculatePremium(msg.sender));
-
-        InsuranceClient storage customer = insuranceMapping[msg.sender];
-        customer.receivedPremiums += msg.value;
-
-        // Initialize the other 
-        customer.claimPayouts = 0;
-        customer.tokenCount = 0;
-
-        // 
-        isClientInsured[msg.sender] = true;
-
-        return isClientInsured[msg.sender];
-    }
-
-    function tokensAgainstCount()
 
     /*
     ================================================================
                             Bike housekeeping
     ================================================================
     */ 
+
 
     // Check if a bike has been used, if not
 
@@ -297,13 +192,14 @@ contract BikeSharing {
         payable
         validParametersBike(bikeId) 
         adminExcluded
-        returns (bool) 
+        returns (bool success, uint256 nbRides) 
     {
-        
-        // Require that the bikeId remains in the desired interval
-//        require(bikeId >= 0 && bikeId < MAX_BIKE_COUNT);
+
+        // Require that the user pays the right amount for the bike
+        require(msg.value == requiredDeposit);
 
         // Check if the bike is activated
+        // TODO : Make function that says : "Make Bike Available"
 
         if(isBikeFirstUse(bikeId)) {
             bikeMapping[bikeId] = Bike(
@@ -327,6 +223,7 @@ contract BikeSharing {
         }
 
         // Check if the address is a client, if not create a struct 
+        // TODO : Make function that says : "Make client Good to Go"
         if(!isClient(msg.sender)){
 
             clientMapping[msg.sender] = Client(
@@ -347,59 +244,29 @@ contract BikeSharing {
             // TO TEST
             require(clientMapping[msg.sender].state == ClientState.GOOD_TO_GO);
         }
-        
-        // Check if the client is insured
-        if(isClientInsured[msg.sender]==true) {
-            uint256 premium = calculatePremium(msg.sender);
-            require(msg.value == requiredDeposit + premium);
-            InsuranceClient memory policyholder = insuranceMapping[msg.sender];
 
-            // TODO : the premium has to be transferred to the insurance company !!
-            policyholder.receivedPremiums += premium;
-
-        } else {
-            // Require that the requiredDeposit is paid in full
-            require(msg.value == requiredDeposit);
-        }
+        // Accounting
 
         clientMapping[msg.sender].received += requiredDeposit;
-
         emit LogReceivedFunds(msg.sender, msg.value);
 
         // Change bike situation and state
-
         bikeMapping[bikeId].lastRenter = msg.sender;
         bikeMapping[bikeId].currentlyInUse = true;
         bikeMapping[bikeId].usageTime = now;
-        
         bikeMapping[bikeId].state = BikeState.IN_USE;        
         emit BikeInRide(bikeId);
 
         // Change client state
-
         clientMapping[msg.sender].state = ClientState.IN_RIDE;         
         emit ClientInRide(msg.sender);
 
-        // Obsolete
-        emit LogBikeRent(bikeId, msg.sender, bikeMapping[bikeId].currentlyInUse);
+        // Change number of rides
 
-        return bikeMapping[bikeId].currentlyInUse;
+        clientMapping[msg.sender].numberRides += 1;
 
-    }
-    
-    modifier bikeInRide (uint bikeId) {
-        require(bikeMapping[bikeId].state == BikeState.IN_USE);
-        _;
-    }
+        return bikeMapping[bikeId].currentlyInUse, clientMapping[msg.sender].numberRides;
 
-    modifier bikeUser (uint bikeId, address clientAdr) {
-        require(bikeMapping[bikeId].lastRenter == clientAdr);
-        _;
-    }
-
-    modifier clientInRide (address clientAdr) {
-        require(clientMapping[clientAdr].state == ClientState.IN_RIDE);
-        _;
     }
 
     function surrenderBike(uint bikeId, bool newCondition) 
@@ -410,75 +277,31 @@ contract BikeSharing {
         clientInRide(msg.sender)
         bikeUser(bikeId, msg.sender)
         adminExcluded
-        returns (bool success) {
-        
-        /* ============== Bike ============== */
+        returns (bool success) 
+    {
 
         // Compute the amount charged for the bike
         uint feeCharged = calculateFee(now - bikeMapping[bikeId].usageTime);
         uint owedToClient = clientMapping[msg.sender].received - feeCharged;
-        
-        /* ============== Insurance ============== */
 
-        if (isClientInsured[msg.sender] == true) {
-
-            InsuranceClient storage policyholder = insuranceMapping[msg.sender];
-
-            if (newCondition == false) {
-                // The dude will not be charged (or a little extra)
-                // TODO :  How is the insurer going to pay the charge ?? 
-                owedToClient = 0;
-
-                // His count of accident changes
-                policyholder.accidentCount += 1;
-
-                // His payout also. THIS IS A NET VALUE, NORMALLY THE CLIENT IS OWED NOTHING
-                policyholder.claimPayouts += DAMAGE_PAYMENT;
-                // The insurance will pay for the deposit. 
-
-                // Eventually, the guy will be paid back by the insurer. 
-                owedToClient += DAMAGE_PAYMENT - INSURANCE_RETENTION;
-
-                // TODO : MAKE THE SCOOTER UNRENTABLE
-                bikeMapping[bikeId].state = BikeState.DEACTIVATED;
-                emit BikeDeactivated(bikeId);
-
-            } else {
-                // Good shape : will gain a token
-
-                policyholder.tokenCount += tokenRewardAmount;
-                rewardRider(msg.sender);
-                bikeMapping[bikeId].state = BikeState.AVAILABLE;
-                emit BikeAvailable(bikeId);
-            }
-
+        if (newCondition == false) {
+        	owedToClient = 0;
+            bikeMapping[bikeId].state = BikeState.DEACTIVATED;
+            emit BikeDeactivated(bikeId);
         } else {
-            // If bad condition, then the guy is owed nothing
-            if (newCondition == false) {
-                owedToClient = 0;
-
-                bikeMapping[bikeId].state = BikeState.DEACTIVATED;
-                emit BikeDeactivated(bikeId);
-
-            } else {
-                bikeMapping[bikeId].state = BikeState.AVAILABLE;                
-                emit BikeAvailable(bikeId);   
-            }
+        	clientMapping[msg.sender].goodRides += 1;
+        	bikeMapping[bikeId].state = BikeState.AVAILABLE;
+        	emit BikeAvailable(bikeId);
         }
-
-        /* ============== Accounting / Housekeeping ============== */
 
         // Update the transaction
         clientMapping[msg.sender].returned += owedToClient;
-        
-        // Pay back the remainder
 
         if(clientMapping[msg.sender].returned != 0) {
             msg.sender.call.value(owedToClient));    
         }
 
         emit LogReturnedFunds(msg.sender, clientMapping[msg.sender].returned);
-
         // Reset the accounting for the client
         clientMapping[msg.sender].received = 0;
         clientMapping[msg.sender].returned = 0;
@@ -489,8 +312,9 @@ contract BikeSharing {
         emit ClientGoodToGo(msg.sender);
 
         return true;
+
     }
-    
+
     /* 
     ================================================================
                             Fallback function
@@ -507,5 +331,5 @@ contract BikeSharing {
     }
 
 
-    
 }
+

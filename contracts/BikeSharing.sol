@@ -1,7 +1,9 @@
 pragma solidity ^0.5.2;
 
 contract BikeSharing {
-        
+    
+    // https://www.ethereum.org/crowdsale
+
     // State variables
     address admin;
     uint256 requiredDeposit;
@@ -43,6 +45,9 @@ contract BikeSharing {
         requiredDeposit = _requiredDeposit;
         hourlyFee = _hourlyFee;
         
+        // TODO : ajouter les vélos au fur et à mesure qu'ils sont appelés
+        // A la première prise du vélo, lui donner les conditions par défaut
+
         for (uint i=0; i<bikeCount; i++) {
             bikes.push(Bike({
                 lastRenter: address(0),
