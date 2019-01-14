@@ -177,12 +177,20 @@ contract Insurance is BikeSharing {
 
 	function calculatePremium(address insuranceTaker) 
 	    view
-	    public
 	    insuredClient(insuranceTaker)
 	    returns (uint premium)
 	{
 	    InsuranceClient memory customer = insuranceMapping[insuranceTaker];
-	    return mul((customer.netClaims + 1),premiumRate);
+	    return mul((customer.netClaims + 1), premiumRate);
+	}
+
+	function viewApplicablePremium (uint256 nbRides)
+		view
+		public
+		insuredClient(msg.sender)
+		returns (uint applicablePremium)
+	{
+		return mul(nbRides, calculatePremium(msg.sender));
 	}
 
 	// Big function for the customer to update his/her account of claims, premium, tokens
@@ -191,18 +199,62 @@ contract Insurance is BikeSharing {
 		payable
 		returns (bool success)
 	{
-		
-		// Actualiser les claims
+		// Combien de nouveaux trajets ? 
+		uint256 newRides = getNewRides(msg.sender);
 
-		// Actualiser les primes
-		uint256 pendingPremia = getPendingPremia(msg.sender);
+		if (newRides == 0) return false;
+
+		// Pour les newrides, payer la prime nécessaire
+		uint256 pendingPremia = getPendingPremia(msg.sender, newRides);
 		require (msg.value == pendingPremia);
 
+		// Update Rides
+		updateRides(msg.sender, newRides);
+		// Update Paid Premium
+		updatePremiumPaid(msg.sender, pendingPremia);
+
+		// How many new claims ? 
+		uint256 pendingBadRides = getPendingBadRides(msg.sender);
+		require(pendingBadRides <= newRides);
+
+		// Actualiser le nombre de claims
+		updateClaims(msg.sender, pendingBadRides);
+
 		// Repayer les gens
-		regularizePaybacks();
+		regularizePaybacks(msg.sender);
 
 		// Distribuer les tokens
 
+	}
+
+	modifier positiveInput (uint256 _input) {
+		require(_input > 0);
+		_;
+	}
+
+	function getPendingPremia (address insuredAddress, uint256 newRides)
+		view
+		positiveInput(newRides)
+		returns (uint256 pendingPremia)
+	{
+		return mul(newRides, calculatePremium(insuredAddress));
+	}
+
+
+	function updateRides (address insuredAddress, uint256 newRides)
+		public
+		positiveInput(newRides)
+	{
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];
+		insured.totalRides += newRides;
+	}
+
+	function updatePremiumPaid (address insuredAddress, uint256 premiumAmount)
+		public
+		positiveInput(premiumAmount)
+	{
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];
+		insured.totalPremiumPaid += premiumAmount;
 	}
 
 	function getClaimAmount(uint grossAmount, uint retention)
@@ -212,26 +264,26 @@ contract Insurance is BikeSharing {
 		return sub(grossAmount,retention);
 	}
 
-
 	// Reconcile number of claims !
-	function regularizeClaims (address insuredAddress) 
-		view
-		returns
+	function updateClaims (address insuredAddress, uint256 pendingBadRides) 
+		public
+		positiveInput(pendingBadRides)
 	{
-
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];
+		insured.grossClaims += pendingBadRides;
+		insured.netClaims += pendingBadRides;
 	}
 
-	function regularizeRides (address insuredAddress)
+	// ONLY READS THE NUMBER OF RIDES (DIFFERENCE BTW INSURANCE DATA AND BIKE DATA)
+	function getNewRides (address insuredAddress)
 		view
 		returns (uint256 countNewRides) 
 	{
-		InsuranceClient storage insured = insuranceMapping[insuredAddress];
-		// Get ride count from bike shop
+		InsuranceClient memory insured = insuranceMapping[insuredAddress];
 		uint256 ridesCount = clientMapping[insuredAddress].numberRides;
 
 		if (ridesCount > insured.totalRides) {
-			uint256 newRides = sub(ridesCount,insured.totalRides);
-			insured.totalRides += newRides;
+			uint256 newRides = sub(ridesCount, insured.totalRides);
 			return newRides;
 		} else {
 			return 0;
@@ -239,21 +291,6 @@ contract Insurance is BikeSharing {
 	}
 
 //// Are there new rides ? If so, please pay the pending premiums
-
-	function getPendingPremia (address insuredAddress)
-		view
-		returns (uint256 pendingPremia)
-	{
-		InsuranceClient storage insured = insuranceMapping[insuredAddress];
-		uint256 newRides = regularizeRides(insuredAddress);
-
-		if (newRides > 0) {
-			return mul(newRides,calculatePremium(insuredAddress));
-		} else {
-			return 0;
-		}
-
-	}
 
 //// New claims : number rides - number good rides - number of rides already paid out
 
@@ -266,38 +303,43 @@ contract Insurance is BikeSharing {
 		return sub(numberBadRides, insured.nbPaybacks);
 	}
 
+// grossClaims - nbPaybacks = pendingBadRides
+	
 	function regularizePaybacks (address insuredAddress)
-		view
+		public
 	{
 		// Get the claim count from mapping
 		InsuranceClient storage insured = insuranceMapping[insuredAddress];
 		uint256 pendingBadRides = getPendingBadRides(insuredAddress);
 
-		if (pendingBadRides > 0) {
+		require(pendingBadRides > 0);
 
-			insured.grossClaims += pendingBadRides;
-			insured.netClaims += pendingBadRides;
-
-			uint paybackAmount = mul(pendingBadRides, getClaimAmount(BIKE_VALUE, retentionAmount));
-
-			if(paybackAmount > 0) {
-				insuredAddress.call.value(paybackAmount);
-				emit ClaimsRepaid(pendingBadRides, paybackAmount);
-								
-				insured.nbPaybacks += pendingBadRides;
-				insured.paybackAmount += paybackAmount;
-			}
-
-		}
+		if (insured.grossClaims - insured.nbPaybacks != pendingBadRides) {
+			updateClaims(insuredAddress, pendingBadRides);
+		} 
 		
+		// Compute payback
+		uint paybackAmount = mul(pendingBadRides, getClaimAmount(BIKE_VALUE, retentionAmount));
+		insuredAddress.call.value(paybackAmount);
+		emit ClaimsRepaid(pendingBadRides, paybackAmount);
+
+		// Update accounting
+		insured.nbPaybacks += pendingBadRides;
+		insured.paybackAmount += paybackAmount;
+
+		require(insured.grossClaims - insured.nbPaybacks == 0);
+
 	}
 
 	// Regularize with number of tokens
+	// nbTokens = nbGoodRides
+
 	function regularizeTokens (address insuredAddress)
 	{
 
 	}
 
+	// The insuree has the option to exchange tokens against a reduction of claims
 	function tokenClaimReducer()
 	{
 
