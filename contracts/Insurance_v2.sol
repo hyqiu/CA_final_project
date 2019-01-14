@@ -292,11 +292,6 @@ contract Insurance is BikeSharing {
 		
 	}
 
-	function regularizePremia (address insuredAddress)
-	{
-
-	}
-
 	// Regularize with number of tokens
 	function regularizeTokens (address insuredAddress)
 	{
