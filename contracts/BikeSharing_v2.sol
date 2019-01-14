@@ -16,7 +16,7 @@ contract BikeSharing {
     uint256 hourlyFee;
 
     // Mappings
-    mapping(address => Client) public clientMapping;
+    mapping(address => Client) internal clientMapping;
     mapping(uint256 => Bike) bikeMapping; // not public 
     mapping(uint256 => bool) isBikeActive; // not public
     mapping(address => bool) isBikeClient; // notpublic

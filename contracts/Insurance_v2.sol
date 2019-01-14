@@ -10,11 +10,12 @@ contract Insurance is BikeSharing {
 	// Constant
 	uint constant public INSURANCE_RETENTION = 200 finney;
 	uint256 constant public CLAIM_TOKEN_RATIO = 5;
-	uint256 constant public PREMIUM_RATE = 100 finney;
+	uint constant public PREMIUM_RATE = 100 finney;
 
 	// Global Variables
 	address insurer;
 	uint premiumRate;
+	uint retentionAmount;
 
     // InsuredList for count
     address[] public insuredList;
@@ -33,6 +34,9 @@ contract Insurance is BikeSharing {
 		uint256 netClaims;
 		// Token count
 		uint256 nbTokensOwned;
+		// Count of paybacks
+		uint256 nbPaybacks;
+		uint256 paybackAmount;
 	}
 
 	// Token variables
@@ -53,6 +57,7 @@ contract Insurance is BikeSharing {
 	event TokenCreated(address newTokenAddress);
 	event TokenRewardSet(uint256 tokenReward);
 	event TokenPaid(address insuredAddress, uint256 amount);
+	event ClaimsRepaid(uint256 count, uint256 totalAmount);
 
 	/*
 	================================================================
@@ -86,6 +91,7 @@ contract Insurance is BikeSharing {
     	insurer = msg.sender;
     	claimTokenRatio = CLAIM_TOKEN_RATIO;
     	premiumRate = PREMIUM_RATE;
+    	retentionAmount = INSURANCE_RETENTION;
         
         // Initialize a BehaviourToken
         setBehaviourToken(new BehaviourToken());
@@ -157,7 +163,9 @@ contract Insurance is BikeSharing {
         		totalRides: 0,
         		grossClaims: 0,
         		netClaims: 0,
-        		nbTokensOwned: 0
+        		nbTokensOwned: 0,
+        		nbPaybacks: 0,
+        		paybackAmount: 0
         	}
     	);
 
@@ -189,9 +197,75 @@ contract Insurance is BikeSharing {
 
 	}
 
-	function regularizeClaims (address insuredAddress)
+	function getClaimAmount(uint grossAmount, uint retention)
+		view
+		returns (uint claimAmount)
+	{
+		return sub(grossAmount,retention);
+	}
+
+
+	function regularizeRides (address insuredAddress)
+		view
+		returns (uint256 countNewRides) 
+	{
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];
+		// Get ride count from bike shop
+		uint256 ridesCount = clientMapping[insuredAddress].numberRides;
+
+		if (ridesCount > insured.totalRides) {
+			uint256 newRides = ridesCount - insured.totalRides;
+			insured.totalRides += newRides;
+			return newRides;
+		} else {
+			return 0;
+		}
+	}
+
+//// Are there new rides ? If so, please pay the pending premiums
+
+	function regularizePremia (address insuredAddress)
+		view
 	{
 
+		
+
+	}
+
+//// New claims : number rides - number good rides - number of rides already paid out
+
+	function getPendingBadRides (address insuredAddress)
+		view
+		returns (uint256 countBadRides)
+	{
+		uint256 numberBadRides = clientMapping[insuredAddress].numberRides - clientMapping[insuredAddress].goodRides;
+		return numberBadRides - clientMapping[insuredAddress].nbPaybacks;
+	}
+
+	function regularizeClaims (address insuredAddress)
+		view
+	{
+		// Get the claim count from mapping
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];
+		uint256 pendingBadRides = getPendingBadRides(insuredAddress);
+
+		if (pendingBadRides > 0) {
+
+			insured.grossClaims += pendingBadRides;
+			insured.netClaims += pendingBadRides;
+
+			uint paybackAmount = mul(pendingBadRides, getClaimAmount(BIKE_VALUE, retentionAmount));
+
+			if(paybackAmount > 0) {
+				insuredAddress.call.value(paybackAmount);
+				emit ClaimsRepaid(pendingBadRides, paybackAmount);
+								
+				insured.nbPaybacks += pendingBadRides;
+				insured.paybackAmount += paybackAmount;
+			}
+
+		}
+		
 	}
 
 	function regularizePremia (address insuredAddress)
