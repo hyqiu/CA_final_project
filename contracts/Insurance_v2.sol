@@ -8,9 +8,9 @@ contract Insurance is BikeSharing {
 	using SafeMath for uint256;
 
 	// Constant
-	uint constant public INSURANCE_RETENTION = 200 finney;
+	uint constant public INSURANCE_RETENTION = 100 finney;
 	uint256 constant public CLAIM_TOKEN_RATIO = 5;
-	uint constant public PREMIUM_RATE = 100 finney;
+	uint constant public PREMIUM_RATE = 10 finney;
 
 	// Global Variables
 	address insurer;
@@ -182,7 +182,7 @@ contract Insurance is BikeSharing {
 	    returns (uint premium)
 	{
 	    InsuranceClient memory customer = insuranceMapping[insuranceTaker];
-	    return (customer.netClaims + 1) * premiumRate;
+	    return mul((customer.netClaims + 1),premiumRate);
 	}
 
 	// Big function for the customer to update his/her account of claims, premium, tokens
@@ -191,9 +191,17 @@ contract Insurance is BikeSharing {
 		payable
 		returns (bool success)
 	{
+		
+		// Actualiser les claims
 
-		regularizeClaims(msg.sender);
+		// Actualiser les primes
+		uint256 pendingPremia = getPendingPremia(msg.sender);
+		require (msg.value == pendingPremia);
 
+		// Repayer les gens
+		regularizePaybacks();
+
+		// Distribuer les tokens
 
 	}
 
@@ -205,6 +213,14 @@ contract Insurance is BikeSharing {
 	}
 
 
+	// Reconcile number of claims !
+	function regularizeClaims (address insuredAddress) 
+		view
+		returns
+	{
+
+	}
+
 	function regularizeRides (address insuredAddress)
 		view
 		returns (uint256 countNewRides) 
@@ -214,7 +230,7 @@ contract Insurance is BikeSharing {
 		uint256 ridesCount = clientMapping[insuredAddress].numberRides;
 
 		if (ridesCount > insured.totalRides) {
-			uint256 newRides = ridesCount - insured.totalRides;
+			uint256 newRides = sub(ridesCount,insured.totalRides);
 			insured.totalRides += newRides;
 			return newRides;
 		} else {
@@ -224,11 +240,18 @@ contract Insurance is BikeSharing {
 
 //// Are there new rides ? If so, please pay the pending premiums
 
-	function regularizePremia (address insuredAddress)
+	function getPendingPremia (address insuredAddress)
 		view
+		returns (uint256 pendingPremia)
 	{
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];
+		uint256 newRides = regularizeRides(insuredAddress);
 
-		
+		if (newRides > 0) {
+			return mul(newRides,calculatePremium(insuredAddress));
+		} else {
+			return 0;
+		}
 
 	}
 
@@ -238,11 +261,12 @@ contract Insurance is BikeSharing {
 		view
 		returns (uint256 countBadRides)
 	{
-		uint256 numberBadRides = clientMapping[insuredAddress].numberRides - clientMapping[insuredAddress].goodRides;
-		return numberBadRides - clientMapping[insuredAddress].nbPaybacks;
+		InsuranceClient memory insured = insuranceMapping[insuredAddress];
+		uint256 numberBadRides = sub(clientMapping[insuredAddress].numberRides, clientMapping[insuredAddress].goodRides);
+		return sub(numberBadRides, insured.nbPaybacks);
 	}
 
-	function regularizeClaims (address insuredAddress)
+	function regularizePaybacks (address insuredAddress)
 		view
 	{
 		// Get the claim count from mapping
@@ -273,6 +297,7 @@ contract Insurance is BikeSharing {
 
 	}
 
+	// Regularize with number of tokens
 	function regularizeTokens (address insuredAddress)
 	{
 
