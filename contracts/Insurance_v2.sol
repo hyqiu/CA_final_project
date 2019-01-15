@@ -3,7 +3,7 @@ pragma solidity ^0.5.2;
 import "./BehaviourToken.sol";
 import "./BikeSharing_v2.sol";
 
-contract Insurance is BikeSharing {
+contract Insurance is BikeSharing, BehaviourToken {
 
 	using SafeMath for uint256;
 
@@ -33,6 +33,7 @@ contract Insurance is BikeSharing {
 		uint256 grossClaims; // Real counter of claims (total)
 		uint256 netClaims;
 		// Token count
+		uint256 grossTokens; // Real counter of tokens (total)
 		uint256 nbTokensOwned;
 		// Count of paybacks
 		uint256 nbPaybacks;
@@ -79,6 +80,11 @@ contract Insurance is BikeSharing {
     	require(isClientInsured[_address] == true);
     	_;
     }
+
+	modifier positiveInput (uint256 _input) {
+		require(_input > 0);
+		_;
+	}
 
 	/*
 	================================================================
@@ -135,9 +141,10 @@ contract Insurance is BikeSharing {
     function rewardRider(address _riderAddress, uint256 _rewardAmount)
         private
         notNullAddress(_riderAddress)
+        positiveInput(_rewardAmount)
     {
-        require(_rewardAmount > 0);
-        behaviourToken.transfer(_riderAddress, _rewardAmount);
+    	behaviourToken.approve(_riderAddress, _rewardAmount);
+        behaviourToken.transferFrom(insurer, _riderAddress, _rewardAmount);
         emit TokenPaid(_riderAddress, _rewardAmount);
     }
 
@@ -163,6 +170,7 @@ contract Insurance is BikeSharing {
         		totalRides: 0,
         		grossClaims: 0,
         		netClaims: 0,
+        		grossTokens: 0,
         		nbTokensOwned: 0,
         		nbPaybacks: 0,
         		paybackAmount: 0
@@ -197,6 +205,7 @@ contract Insurance is BikeSharing {
 	function regularizePayments ()
 		public
 		payable
+		insuredClient(msg.sender)
 		returns (bool success)
 	{
 		// Combien de nouveaux trajets ? 
@@ -233,28 +242,22 @@ contract Insurance is BikeSharing {
 		require(insured.grossClaims - insured.nbPaybacks == 0);
 
 		// Distribuer les tokens
-		uint256 goodRides = clientMapping[msg.sender].goodRides;
+		uint256 pendingTokens = getPendingTokens(msg.sender);
+		// Check : nbTokens = nbGoodRides
+		require(insured.grossTokens + pendingTokens == clientMapping[msg.sender].goodRides);
+
+		rewardRider(msg.sender, pendingTokens);
+		updateTokenCount(msg.sender, pendingTokens);
+
+		return true;
 
 	}
 
-	function updatePayback(address insuredAddress, uint256 paybackAmount, uint256 pendingBadRides)
-		positiveInput(paybackAmount)
-	{
-		InsuranceClient storage insured = insuranceMapping[insuredAddress];		
-		insured.nbPaybacks += pendingBadRides;
-		insured.paybackAmount += paybackAmount;
-	}
+	// 
+	// ===================== View functions =====================
+	//
 
-	modifier positiveInput (uint256 _input) {
-		require(_input > 0);
-		_;
-	}
-
-	function sendPayback (address insuredAddress, uint256 pendingBadRides)
-		private
-	{
-	}
-
+	// @dev : View the Premium that is owed to Insurer
 	function getPendingPremia (address insuredAddress, uint256 newRides)
 		view
 		positiveInput(newRides)
@@ -263,23 +266,7 @@ contract Insurance is BikeSharing {
 		return mul(newRides, calculatePremium(insuredAddress));
 	}
 
-
-	function updateRides (address insuredAddress, uint256 newRides)
-		public
-		positiveInput(newRides)
-	{
-		InsuranceClient storage insured = insuranceMapping[insuredAddress];
-		insured.totalRides += newRides;
-	}
-
-	function updatePremiumPaid (address insuredAddress, uint256 premiumAmount)
-		public
-		positiveInput(premiumAmount)
-	{
-		InsuranceClient storage insured = insuranceMapping[insuredAddress];
-		insured.totalPremiumPaid += premiumAmount;
-	}
-
+	// @dev: Retrive the claim amount that will be paid back to the client
 	function getClaimAmount(uint grossAmount, uint retention)
 		view
 		returns (uint claimAmount)
@@ -287,17 +274,7 @@ contract Insurance is BikeSharing {
 		return sub(grossAmount,retention);
 	}
 
-	// Reconcile number of claims !
-	function updateClaims (address insuredAddress, uint256 pendingBadRides) 
-		public
-		positiveInput(pendingBadRides)
-	{
-		InsuranceClient storage insured = insuranceMapping[insuredAddress];
-		insured.grossClaims += pendingBadRides;
-		insured.netClaims += pendingBadRides;
-	}
-
-	// ONLY READS THE NUMBER OF RIDES (DIFFERENCE BTW INSURANCE DATA AND BIKE DATA)
+	// @dev: Reads the number of rides (difference between insurance and bike data) 
 	function getNewRides (address insuredAddress)
 		view
 		returns (uint256 countNewRides) 
@@ -313,9 +290,8 @@ contract Insurance is BikeSharing {
 		}
 	}
 
-//// Are there new rides ? If so, please pay the pending premiums
-
-//// New claims : number rides - number good rides - number of rides already paid out
+	// @dev : get the number of bad rides that is not taken into account by insurer 
+	// Accounting check -- New claims : number rides - number good rides - number of rides already paid out
 
 	function getPendingBadRides (address insuredAddress)
 		view
@@ -326,45 +302,97 @@ contract Insurance is BikeSharing {
 		return sub(numberBadRides, insured.nbPaybacks);
 	}
 
-// grossClaims - nbPaybacks = pendingBadRides
-	
-//	function regularizePaybacks (address insuredAddress)
-//		public
-//	{
-//		// Get the claim count from mapping
-//		InsuranceClient storage insured = insuranceMapping[insuredAddress];
-//		uint256 pendingBadRides = getPendingBadRides(insuredAddress);
-//
-//		require(pendingBadRides > 0);
-//
-//		if (insured.grossClaims - insured.nbPaybacks != pendingBadRides) {
-//			updateClaims(insuredAddress, pendingBadRides);
-//		} 
-//		
-//		// Compute payback
-//		uint paybackAmount = mul(pendingBadRides, getClaimAmount(BIKE_VALUE, retentionAmount));
-//		insuredAddress.call.value(paybackAmount);
-//		emit ClaimsRepaid(pendingBadRides, paybackAmount);
+	// @dev : Get number of tokens the user is eligible to but hasn't received yet
 
-		// Update accounting
-//		insured.nbPaybacks += pendingBadRides;
-//		insured.paybackAmount += paybackAmount;
-
-//		require(insured.grossClaims - insured.nbPaybacks == 0);
-
-//	}
-
-	// Regularize with number of tokens
-	// nbTokens = nbGoodRides
-
-	function regularizeTokens (address insuredAddress)
+	function getPendingTokens (address insuredAddress)
+		view
+		returns (uint256 pendingTokens)
 	{
-
+		InsuranceClient memory insured = insuranceMapping[insuredAddress];
+		uint256 tokenEligibleRides = clientMapping[insuredAddress].goodRides;
+		return sub(tokenEligibleRides,insured.grossTokens);
 	}
 
-	// The insuree has the option to exchange tokens against a reduction of claims
-	function tokenClaimReducer()
+	// 
+	// ===================== Updating functions =====================
+	//
+
+	// TODO : how to prevent the user to call the update functions ??
+
+	function updatePayback (address insuredAddress, uint256 paybackAmount, uint256 pendingBadRides)
+		internal
+		positiveInput(paybackAmount)
 	{
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];		
+		insured.nbPaybacks += pendingBadRides;
+		insured.paybackAmount += paybackAmount;
+	}
+
+	function updateRides (address insuredAddress, uint256 newRides)
+		internal
+		positiveInput(newRides)
+	{
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];
+		insured.totalRides += newRides;
+	}
+
+	function updatePremiumPaid (address insuredAddress, uint256 premiumAmount)
+		internal
+		positiveInput(premiumAmount)
+	{
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];
+		insured.totalPremiumPaid += premiumAmount;
+	}
+
+	// @dev : reconcile number of claims
+	function updateClaims (address insuredAddress, uint256 pendingBadRides) 
+		internal
+		positiveInput(pendingBadRides)
+	{
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];
+		insured.grossClaims += pendingBadRides;
+		insured.netClaims += pendingBadRides;
+	}
+
+	// @dev : update token count
+	function updateTokenCount (address insuredAddress, uint256 pendingTokens)
+		internal
+		positiveInput(pendingTokens)
+	{
+		InsuranceClient storage insured = insuranceMapping[insuredAddress];
+		insured.grossTokens += pendingTokens;
+		insured.nbTokensOwned += pendingTokens;
+	}
+
+	// Regularize with number of tokens
+	// Check : nbTokens = nbGoodRides
+
+	event TokensClaimExchange (address from, uint256 nbTokens, uint256 claimsInvolved);
+
+	// The insuree has the option to exchange tokens against a reduction of claims
+	function tokenClaimReducer(uint256 nbTokens)
+		public
+		insuredClient(msg.sender)
+		returns (bool success)
+	{
+		require(nbTokens >= CLAIM_TOKEN_RATIO);
+		
+		uint256 claimsToDecrease = nbTokens.div(CLAIM_TOKEN_RATIO);
+		uint256 surplus = nbTokens.mod(CLAIM_TOKEN_RATIO);
+		uint256 exchangedTokens = nbTokens.sub(surplus);
+
+		InsuranceClient storage insured = insuranceMapping[msg.sender];
+		
+		// Give back tokens 
+		behaviourToken.transferFrom(msg.sender, insurer, exchangedTokens);
+
+		// Pay back client
+		insured.nbTokensOwned -= exchangedTokens;
+		insured.netClaims -= claimsToDecrease;
+
+		emit TokensClaimExchange(msg.sender, nbTokens, claimsToDecrease);
+
+		return true;
 
 	}
 

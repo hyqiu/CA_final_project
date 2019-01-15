@@ -56,6 +56,35 @@ contract Insurance {
     }
 
 
+// grossClaims - nbPaybacks = pendingBadRides
+    
+//  function regularizePaybacks (address insuredAddress)
+//      public
+//  {
+//      // Get the claim count from mapping
+//      InsuranceClient storage insured = insuranceMapping[insuredAddress];
+//      uint256 pendingBadRides = getPendingBadRides(insuredAddress);
+//
+//      require(pendingBadRides > 0);
+//
+//      if (insured.grossClaims - insured.nbPaybacks != pendingBadRides) {
+//          updateClaims(insuredAddress, pendingBadRides);
+//      } 
+//      
+//      // Compute payback
+//      uint paybackAmount = mul(pendingBadRides, getClaimAmount(BIKE_VALUE, retentionAmount));
+//      insuredAddress.call.value(paybackAmount);
+//      emit ClaimsRepaid(pendingBadRides, paybackAmount);
+
+        // Update accounting
+//      insured.nbPaybacks += pendingBadRides;
+//      insured.paybackAmount += paybackAmount;
+
+//      require(insured.grossClaims - insured.nbPaybacks == 0);
+
+//  }
+
+
 
 
 }
