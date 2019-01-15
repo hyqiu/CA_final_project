@@ -76,7 +76,7 @@ contract BikeSharing {
         _;
     }
 
-    modifier validParametersBike(uint bikeId) {
+    modifier validParametersBike(uint256 bikeId) {
         require(bikeId >= 0 && bikeId < MAX_BIKE_COUNT);
         _;
     }
@@ -117,18 +117,21 @@ contract BikeSharing {
 
     // Client creation
     event ClientCreated(address clientAddress);
+    // Ban client event
+
 
     // Change of state events
-    event BikeAvailable(uint bikeId);
+    event BikeAvailable(uint256 bikeId);
     event ClientGoodToGo(address clientAddress);
 
-    event BikeInRide(uint bikeId);
+    event BikeInRide(uint256 bikeId);
     event ClientInRide(address clientAddress);
 
-    event BikeDeactivated(uint bikeId);
-
     event BikeInitiated(uint256 bikeId);
-    event CleanSlate(address clientAdr);
+    event BikeDeactivated(uint256 bikeId);
+    
+    event BikeUsageStart(uint256 bikeId);
+    event BikeUsageStop(uint256 bikeId);
 
     /*
     ================================================================
@@ -138,7 +141,7 @@ contract BikeSharing {
 
     /// @dev Contract constructor sets the bike Admin address, the fee (by minute) and the necessary deposit
     /// @param _fee , put 500 szabo by default
-    constructor(uint256 _fee) public payable {
+    constructor(uint256 _fee) public {
         bikeAdmin = msg.sender;
         requiredDeposit = BIKE_VALUE;
         fee = _fee;
@@ -186,7 +189,7 @@ contract BikeSharing {
     /// @dev Check how much the contract carries value
     /// @return Contract balance
     function getBalance() 
-        private 
+        public 
         view
         adminOnly 
         returns(uint balance)
@@ -210,6 +213,31 @@ contract BikeSharing {
         uint toPay = num_minutes.mul(fee);
         return toPay;
     }
+
+    /// @dev Check Bike Data
+    /// @param bikeId give bike's ID
+    /// @return Bike data
+    function checkBike (uint256 bikeId)
+        public
+        view
+        returns (address lastRenter, bool condition, bool currentlyInUse, uint usageTime, BikeState state)
+    {
+        Bike memory bike = bikeMapping[bikeId];
+        return (bike.lastRenter, bike.condition, bike.currentlyInUse, bike.usageTime, bike.state);
+    }
+
+    /// @dev Check Client Data
+    /// @param Check client's address 
+    /// @return Client Data
+    function checkUser (address clientAdr)
+        public
+        view
+        returns (uint clientListPointer, ClientState state, uint received, uint returned, uint256 numberRides, uint256 goodRides)
+    {
+        Client memory client = clientMapping[clientAdr];
+        return (client.clientListPointer, client.state, client.received, client.returned, client.numberRides, client.goodRides);
+    }
+
 
     /* 
     ================================================================
@@ -290,6 +318,8 @@ contract BikeSharing {
         // Change bike situation and state
         bikeMapping[bikeId].lastRenter = msg.sender;
         bikeMapping[bikeId].currentlyInUse = true;
+        emit BikeUsageStart(bikeId);
+
         bikeMapping[bikeId].usageTime = now;
         bikeMapping[bikeId].state = BikeState.IN_USE;        
         emit BikeInRide(bikeId);
@@ -302,11 +332,9 @@ contract BikeSharing {
         return(bikeMapping[bikeId].currentlyInUse, clientMapping[msg.sender].numberRides);
 
     }
-
-
+    
     /// @dev Someone can stop bike usage
     /// @param bikeId The client must input the bike id 
-    /// @param newCondition its condition (true = good, false = bad)
     /// @return Did it succeed ? 
     function surrenderBike(uint bikeId, bool newCondition) 
         public 
@@ -316,12 +344,13 @@ contract BikeSharing {
         clientInRide(msg.sender)
         bikeUser(bikeId, msg.sender)
         adminExcluded
-        returns (bool success) 
+        returns (bool success)
     {
-
-        // Compute the amount charged for the bike
         uint feeCharged = calculateFee(now.sub(bikeMapping[bikeId].usageTime));
         uint owedToClient = clientMapping[msg.sender].received.sub(feeCharged);
+
+        bikeMapping[bikeId].currentlyInUse = false;
+        emit BikeUsageStop(bikeId);
 
         if (newCondition == false) {
             owedToClient = 0;
@@ -329,32 +358,20 @@ contract BikeSharing {
             emit BikeDeactivated(bikeId);
         } else {
             clientMapping[msg.sender].goodRides += 1;
+            clientMapping[msg.sender].returned += owedToClient;
+            msg.sender.transfer(owedToClient);
+            emit LogReturnedFunds(msg.sender, clientMapping[msg.sender].returned);                
             bikeMapping[bikeId].state = BikeState.AVAILABLE;
             emit BikeAvailable(bikeId);
         }
 
-        // Perform the transaction
-        if(clientMapping[msg.sender].returned != 0) {
-            msg.sender.call.value(owedToClient);
-            clientMapping[msg.sender].returned += owedToClient;
-            emit LogReturnedFunds(msg.sender, clientMapping[msg.sender].returned);                
-        } else {
-            revert();
-        }
-        
-        // Reset the accounting for the client
-        clientMapping[msg.sender].received = 0;
-        clientMapping[msg.sender].returned = 0;
-        emit CleanSlate(msg.sender);
-        
         // Make the client good to go
-
         clientMapping[msg.sender].state = ClientState.GOOD_TO_GO;
         emit ClientGoodToGo(msg.sender);
 
         return true;
-
     }
+
 
     /* 
     ================================================================
