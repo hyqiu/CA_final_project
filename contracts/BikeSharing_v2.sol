@@ -4,16 +4,18 @@ import "../installed_contracts/zeppelin/contracts/math/SafeMath.sol";
 
 contract BikeSharing {
 
-	using SafeMath for uint256;
+    using SafeMath for uint256;
 
-	uint constant public MAX_BIKE_COUNT = 1000;
-	uint constant public BIKE_VALUE = 1 ether;
+    uint256 constant public MAX_BIKE_COUNT = 1000;
+    uint constant public BIKE_VALUE = 1 ether;
+    uint256 constant public TIME_LIMIT = 1440; // in minutes
+    uint256 constant public MINUTE_FACTOR = 60;
 
     // Hyperparameters
 
-    address admin;
+    address bikeAdmin;
     uint requiredDeposit;
-    uint256 hourlyFee;
+    uint256 fee;
 
     // Mappings
     mapping(address => Client) internal clientMapping;
@@ -43,14 +45,14 @@ contract BikeSharing {
     }
     
     struct Client {
-    	uint clientListPointer;
-    	ClientState state;
-    	// For 1 ride, how much received and returned
+        uint clientListPointer;
+        ClientState state;
+        // For 1 ride, how much received and returned
         uint received;
         uint returned;
-    	// Count of number of rides, number of good rides
-    	uint256 numberRides;
-    	uint256 goodRides;
+        // Count of number of rides, number of good rides
+        uint256 numberRides;
+        uint256 goodRides;
     }
 
     /*
@@ -60,12 +62,12 @@ contract BikeSharing {
     */ 
 
     modifier adminOnly() {
-        require(msg.sender == admin);
+        require(msg.sender == bikeAdmin);
         _;
     }
 
     modifier adminExcluded() {
-        require(msg.sender != admin);
+        require(msg.sender != bikeAdmin);
         _;
     }
 
@@ -80,11 +82,9 @@ contract BikeSharing {
     }
 
     modifier notNullAddress (address _address) {
-        require(_address != 0);
+        require(_address != address(0));
         _;
     }
-
-	// TODO : a customer cannot rent another bike while he's riding one
 
     modifier bikeInRide (uint bikeId) {
         require(bikeMapping[bikeId].state == BikeState.IN_USE);
@@ -120,12 +120,15 @@ contract BikeSharing {
 
     // Change of state events
     event BikeAvailable(uint bikeId);
-    event ClientGoodToGo(address clientAddress)
+    event ClientGoodToGo(address clientAddress);
 
     event BikeInRide(uint bikeId);
     event ClientInRide(address clientAddress);
 
     event BikeDeactivated(uint bikeId);
+
+    event BikeInitiated(uint256 bikeId);
+    event CleanSlate(address clientAdr);
 
     /*
     ================================================================
@@ -133,10 +136,12 @@ contract BikeSharing {
     ================================================================
     */ 
 
-    constructor(uint256 _hourlyFee) public {
-    	bikeAdmin = msg.sender;
-    	requiredDeposit = BIKE_VALUE;
-    	hourlyFee = _hourlyFee;
+    /// @dev Contract constructor sets the bike Admin address, the fee (by minute) and the necessary deposit
+    /// @param _fee , put 500 szabo by default
+    constructor(uint256 _fee) public payable {
+        bikeAdmin = msg.sender;
+        requiredDeposit = BIKE_VALUE;
+        fee = _fee;
     }
 
     /*
@@ -145,9 +150,9 @@ contract BikeSharing {
     ================================================================
     */ 
 
-
-    // Check if a bike has been used, if not
-
+    /// @dev Check if the bike is being used for the first time
+    /// @param bikeId the ID of a bike
+    /// @return True if the bike has never been used, False otherwise
     function isBikeFirstUse(uint256 bikeId) 
         public 
         view 
@@ -156,28 +161,53 @@ contract BikeSharing {
         return isBikeActive[bikeId] == false;
     }
 
-    function getClientCount() public view returns(uint clientCount){
+    /// @dev Count the number of clients 
+    /// @return Number of clients
+    function getClientCount() 
+        public 
+        view 
+        returns(uint clientCount)
+    {
         return clientList.length;
     }
 
-    function isClient(address client) 
+    /// @dev Check if some address is related to a client
+    /// @param clientAdr the address of a client
+    /// @return True if the address is a client address
+
+    function isClient(address clientAdr) 
         public 
         view 
         returns (bool isIndeed)
     {
-        return isBikeClient[client] == true;
+        return isBikeClient[clientAdr] == true;
     }
 
-    function getBalance() public view returns(uint){
+    /// @dev Check how much the contract carries value
+    /// @return Contract balance
+    function getBalance() 
+        private 
+        view
+        adminOnly 
+        returns(uint balance)
+    {
         return address(this).balance;
     }
 
-    function calculateFee(uint duration) public view returns (uint) {
-        uint num_hours = div(duration, 3600);
-        if(num_hours > 24){
+    /// @dev Check the fee amount for a certain duration (in minutes) for renting the bike
+    /// @param duration length 
+    /// @return Fee due 
+    function calculateFee(uint256 duration) 
+        public 
+        view 
+        returns (uint) 
+    {
+        uint256 num_minutes = duration.div(MINUTE_FACTOR);
+         
+        if(num_minutes > TIME_LIMIT){
             return requiredDeposit;
         }
-        uint toPay = num_hours * hourlyFee;
+        uint toPay = num_minutes.mul(fee);
         return toPay;
     }
 
@@ -187,7 +217,10 @@ contract BikeSharing {
     ================================================================
     */
 
-    function rentBike(uint bikeId) 
+    /// @dev Someone can rent a bike
+    /// @param bikeId the client must input the bike id
+    /// @return Did it succeed ? How many rides did the client make ? 
+    function rentBike(uint256 bikeId) 
         public 
         payable
         validParametersBike(bikeId) 
@@ -199,9 +232,8 @@ contract BikeSharing {
         require(msg.value == requiredDeposit);
 
         // Check if the bike is activated
-        // TODO : Make function that says : "Make Bike Available"
-
         if(isBikeFirstUse(bikeId)) {
+
             bikeMapping[bikeId] = Bike(
                 {
                     lastRenter: address(0),
@@ -211,11 +243,15 @@ contract BikeSharing {
                     state: BikeState.DEACTIVATED
                 }
             );
+
             isBikeActive[bikeId] = true;
+            emit BikeInitiated(bikeId);
+
             bikeMapping[bikeId].state = BikeState.AVAILABLE;
             emit BikeAvailable(bikeId);
 
         } else {
+            
             // The bike must be unused, in good condition, activated, and not in ride already
             require(bikeMapping[bikeId].currentlyInUse == false);
             require(bikeMapping[bikeId].condition == true);
@@ -223,30 +259,31 @@ contract BikeSharing {
         }
 
         // Check if the address is a client, if not create a struct 
-        // TODO : Make function that says : "Make client Good to Go"
         if(!isClient(msg.sender)){
 
             clientMapping[msg.sender] = Client(
                 {
+                    clientListPointer: 0,
+                    state: ClientState.GOOD_TO_GO,
                     received: 0,
                     returned: 0,
-                    clientListPointer: 0,
-                    state: ClientState.GOOD_TO_GO
+                    numberRides: 0,
+                    goodRides: 0
                 }
             );
 
             clientMapping[msg.sender].clientListPointer = clientList.push(msg.sender) - 1;
+
             // Finally, the guy is made a client
             isBikeClient[msg.sender] = true;
             emit ClientCreated(msg.sender);
+
         } else {
             // The client must not be already using a scooter
-            // TO TEST
             require(clientMapping[msg.sender].state == ClientState.GOOD_TO_GO);
         }
 
         // Accounting
-
         clientMapping[msg.sender].received += requiredDeposit;
         emit LogReceivedFunds(msg.sender, msg.value);
 
@@ -257,18 +294,20 @@ contract BikeSharing {
         bikeMapping[bikeId].state = BikeState.IN_USE;        
         emit BikeInRide(bikeId);
 
-        // Change client state
-        clientMapping[msg.sender].state = ClientState.IN_RIDE;         
+        // Change client state and number of rides
+        clientMapping[msg.sender].state = ClientState.IN_RIDE;
+        clientMapping[msg.sender].numberRides += 1;
         emit ClientInRide(msg.sender);
 
-        // Change number of rides
-
-        clientMapping[msg.sender].numberRides += 1;
-
-        return bikeMapping[bikeId].currentlyInUse, clientMapping[msg.sender].numberRides;
+        return(bikeMapping[bikeId].currentlyInUse, clientMapping[msg.sender].numberRides);
 
     }
 
+
+    /// @dev Someone can stop bike usage
+    /// @param bikeId The client must input the bike id 
+    /// @param newCondition its condition (true = good, false = bad)
+    /// @return Did it succeed ? 
     function surrenderBike(uint bikeId, bool newCondition) 
         public 
         bikeClientOnly(msg.sender)
@@ -281,30 +320,32 @@ contract BikeSharing {
     {
 
         // Compute the amount charged for the bike
-        uint feeCharged = calculateFee(now - bikeMapping[bikeId].usageTime);
-        uint owedToClient = clientMapping[msg.sender].received - feeCharged;
+        uint feeCharged = calculateFee(now.sub(bikeMapping[bikeId].usageTime));
+        uint owedToClient = clientMapping[msg.sender].received.sub(feeCharged);
 
         if (newCondition == false) {
-        	owedToClient = 0;
+            owedToClient = 0;
             bikeMapping[bikeId].state = BikeState.DEACTIVATED;
             emit BikeDeactivated(bikeId);
         } else {
-        	clientMapping[msg.sender].goodRides += 1;
-        	bikeMapping[bikeId].state = BikeState.AVAILABLE;
-        	emit BikeAvailable(bikeId);
+            clientMapping[msg.sender].goodRides += 1;
+            bikeMapping[bikeId].state = BikeState.AVAILABLE;
+            emit BikeAvailable(bikeId);
         }
 
-        // Update the transaction
-        clientMapping[msg.sender].returned += owedToClient;
-
+        // Perform the transaction
         if(clientMapping[msg.sender].returned != 0) {
-            msg.sender.call.value(owedToClient));    
+            msg.sender.call.value(owedToClient);
+            clientMapping[msg.sender].returned += owedToClient;
+            emit LogReturnedFunds(msg.sender, clientMapping[msg.sender].returned);                
+        } else {
+            revert();
         }
-
-        emit LogReturnedFunds(msg.sender, clientMapping[msg.sender].returned);
+        
         // Reset the accounting for the client
         clientMapping[msg.sender].received = 0;
         clientMapping[msg.sender].returned = 0;
+        emit CleanSlate(msg.sender);
         
         // Make the client good to go
 
@@ -322,7 +363,7 @@ contract BikeSharing {
     */
 
     function ()
-        public
+        external
         payable
     {
         if (msg.value > 0) {

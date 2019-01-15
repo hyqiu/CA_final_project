@@ -104,15 +104,6 @@ contract Insurance is BikeSharing, BehaviourToken {
         uint256 rideReward = _rideReward; // 1 by default
         setBehaviourTokenReward(rideReward);
 
-        // Connect with the Bike Sharing contract
-        //
-
-        // One option : 
-        // address mapBikeClients in argument
-        /// bikeSharing = BikeSharing(mapBikeClients);
-
-        // Second option : inheritance
-
     }
 
 	/*
