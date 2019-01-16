@@ -1,9 +1,10 @@
 pragma solidity ^0.5.2;
 
+import "../installed_contracts/zeppelin/contracts/math/SafeMath.sol";
 import "./BehaviourToken.sol";
 import "./BikeSharing_v2.sol";
 
-contract Insurance is BikeSharing, BehaviourToken {
+contract Insurance is BikeSharing {
 
 	using SafeMath for uint256;
 
@@ -67,7 +68,7 @@ contract Insurance is BikeSharing, BehaviourToken {
 	*/
 
 	modifier notNullAddress (address _address) {
-		require(_address != 0);
+		require(_address != address(0));
 		_;
 	}
 
@@ -100,7 +101,8 @@ contract Insurance is BikeSharing, BehaviourToken {
     	retentionAmount = INSURANCE_RETENTION;
         
         // Initialize a BehaviourToken
-        setBehaviourToken(new BehaviourToken());
+        behaviourToken = new BehaviourToken();
+        //setBehaviourToken(new BehaviourToken());
         uint256 rideReward = _rideReward; // 1 by default
         setBehaviourTokenReward(rideReward);
 
@@ -175,12 +177,13 @@ contract Insurance is BikeSharing, BehaviourToken {
     }
 
 	function calculatePremium(address insuranceTaker) 
+	    public
 	    view
 	    insuredClient(insuranceTaker)
 	    returns (uint premium)
 	{
 	    InsuranceClient memory customer = insuranceMapping[insuranceTaker];
-	    return mul((customer.netClaims + 1), premiumRate);
+	    return (customer.netClaims + 1).mul(premiumRate);
 	}
 
 	function viewApplicablePremium (uint256 nbRides)
@@ -189,7 +192,7 @@ contract Insurance is BikeSharing, BehaviourToken {
 		insuredClient(msg.sender)
 		returns (uint applicablePremium)
 	{
-		return mul(nbRides, calculatePremium(msg.sender));
+		return nbRides.mul(calculatePremium(msg.sender));
 	}
 
 	// Big function for the customer to update his/her account of claims, premium, tokens
@@ -220,7 +223,7 @@ contract Insurance is BikeSharing, BehaviourToken {
 		if (pendingBadRides != 0) {
 			// Actualiser le nombre de claims
 			updateClaims(msg.sender, pendingBadRides);
-			uint paybackAmount = mul(pendingBadRides, getClaimAmount(BIKE_VALUE, retentionAmount));
+			uint paybackAmount = pendingBadRides.mul(getClaimAmount(BIKE_VALUE, retentionAmount));
 			// Actualiser le payback
 			if (paybackAmount != 0) {
 				msg.sender.call.value(paybackAmount);
@@ -251,22 +254,25 @@ contract Insurance is BikeSharing, BehaviourToken {
 	// @dev : View the Premium that is owed to Insurer
 	function getPendingPremia (address insuredAddress, uint256 newRides)
 		view
+		private
 		positiveInput(newRides)
 		returns (uint256 pendingPremia)
 	{
-		return mul(newRides, calculatePremium(insuredAddress));
+		return newRides.mul(calculatePremium(insuredAddress));
 	}
 
 	// @dev: Retrive the claim amount that will be paid back to the client
 	function getClaimAmount(uint grossAmount, uint retention)
 		view
+		private
 		returns (uint claimAmount)
 	{
-		return sub(grossAmount,retention);
+		return grossAmount.sub(retention);
 	}
 
 	// @dev: Reads the number of rides (difference between insurance and bike data) 
 	function getNewRides (address insuredAddress)
+        private
 		view
 		returns (uint256 countNewRides) 
 	{
@@ -274,7 +280,7 @@ contract Insurance is BikeSharing, BehaviourToken {
 		uint256 ridesCount = clientMapping[insuredAddress].numberRides;
 
 		if (ridesCount > insured.totalRides) {
-			uint256 newRides = sub(ridesCount, insured.totalRides);
+			uint256 newRides = ridesCount.sub(insured.totalRides);
 			return newRides;
 		} else {
 			return 0;
@@ -285,23 +291,25 @@ contract Insurance is BikeSharing, BehaviourToken {
 	// Accounting check -- New claims : number rides - number good rides - number of rides already paid out
 
 	function getPendingBadRides (address insuredAddress)
+	    private
 		view
 		returns (uint256 countBadRides)
 	{
 		InsuranceClient memory insured = insuranceMapping[insuredAddress];
-		uint256 numberBadRides = sub(clientMapping[insuredAddress].numberRides, clientMapping[insuredAddress].goodRides);
-		return sub(numberBadRides, insured.nbPaybacks);
+		uint256 numberBadRides = clientMapping[insuredAddress].numberRides.sub(clientMapping[insuredAddress].goodRides);
+		return numberBadRides.sub(insured.nbPaybacks);
 	}
 
 	// @dev : Get number of tokens the user is eligible to but hasn't received yet
 
 	function getPendingTokens (address insuredAddress)
+	    private
 		view
 		returns (uint256 pendingTokens)
 	{
 		InsuranceClient memory insured = insuranceMapping[insuredAddress];
 		uint256 tokenEligibleRides = clientMapping[insuredAddress].goodRides;
-		return sub(tokenEligibleRides,insured.grossTokens);
+		return tokenEligibleRides.sub(insured.grossTokens);
 	}
 
 	// 
