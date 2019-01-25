@@ -43,7 +43,6 @@ contract Insurance {
     }
 
     // Token variables
-    address public tokenAddress;
     uint256 tokenRewardAmount;
     uint256 claimTokenRatio;
 
@@ -98,12 +97,11 @@ contract Insurance {
     */
 
     BikeSharing bikeSharing;
-    TryToken behaviourToken;
+    BehaviourToken behaviourToken;
         
     ///@dev Build insurance contract after the bike shop contract
 
     constructor(address payable _shopAddress, string memory _name, string memory _tokenSymbol)
-    //address _tokenAddress) 
         public 
     {
         insurer = msg.sender;
@@ -111,16 +109,8 @@ contract Insurance {
         premiumRate = PREMIUM_RATE;
         retentionAmount = INSURANCE_RETENTION;
         
-        // Initialize a BehaviourToken --> ne marche pas
-        //behaviourToken = new BehaviourToken();
-        //emit TokenCreated(behaviourToken);
         
-        // Version qui marche
-        //behaviourToken = TryToken(_tokenAddress);
-        //emit TokenCreated(address(behaviourToken));
-        
-        behaviourToken = new TryToken(_name, _tokenSymbol);
-        tokenAddress = address(behaviourToken);
+        behaviourToken = new BehaviourToken(_name, _tokenSymbol);
         
         uint256 rideReward = TOKEN_REWARD; // 1 by default
         setBehaviourTokenReward(rideReward);
@@ -322,7 +312,7 @@ contract Insurance {
     }
 
     function viewInsuranceStatus (address insuredAddress)
-        public
+        external
         view
         returns (uint256 insuredListPointer, uint256 totalPremiumPaid, 
         uint256 totalRides, uint256 grossClaims, uint256 netClaims,
